@@ -103,4 +103,43 @@ if(r)
   reference_count[((uint64)r - KERNBASE) >> 12] = 1;
 }
 ```
+
 2. 当进程尝试向共享页面（COW page）执行“写”操作时，由于页表项的“PTE_W”已经被置位，所以此时会产生page fault。发生page fault时，通过“kalloc()”分配新的物理页面、拷贝旧物理页面的内存到新内存、修改当前页表的PTE的指向、并修改当前PTE的权限位（尤其是要注意COW bit和PTE_W的相应置位）
+在“usertrap()”函数中，代码如下：
+```
+if(r_scause() == 15) {//因为这个实验中是有内存不能write 所以fault的原因应当是store相关的指令 此时该寄存器结果为15
+  uint64 va_fault = r_stval(); //page fault的地址在什么地方 在stval()寄存器中
+  uint64 down = PGROUNDDOWN(va_fault); //对该地址取基址
+  pte_t* pte = walk(p->pagetable, down, 0);
+  uint64 pa = PTE2PA(*pte);
+  acquire(&reference_lock);
+  if(reference_count[(pa-KERNBASE) >> 12] == 1) {
+    //这个页面发生了fault 但实际上它的reference_count为1 不应该发生fault的 所以发生fault的原因是这个页面以前是COW页面 
+    //但是在其伙伴进程分配新页面、复制、修改COW bit、PTE_W的时候 没有改到当前进程的页表项
+    //这就导致当前进程也会fault 
+    //而实际上 当前进程不应该fault 所以过来只需要修改一下COW bit和PTE_W即可
+    *pte &= ~(1<<8);//把COW bit置为0 表示现在这个页面不被共享
+    *pte |= PTE_W;
+  }
+  else {
+    reference_count[(pa-KERNBASE) >> 12] -= 1;//我们现在要分配新的物理页面 所以原来的页面的reference_count需要-1
+    //原来页面的PTE_W和COW bit实际上是取决于具体的页表的 我们在这里没有办法修改其他进程的页表
+    char* mem = kalloc();
+    if(mem == 0) p->killed = 1;//如果没有足够的内存分配 杀死当前进程
+    else {
+      memset(mem, 0, PGSIZE);
+      memmove(mem, (char*)pa, PGSIZE);
+      uint flags = PTE_FLAGS(*pte);
+      flags |= PTE_W;
+      flags &= ~(1<<8);
+      mappages(p->pagetable, down, PGSIZE, (uint64)mem, flags);
+    }
+  }
+  release(&reference_lock);
+}
+else {
+  printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
+  printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+  p->killed = 1;
+}
+```
