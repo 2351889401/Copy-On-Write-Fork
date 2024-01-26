@@ -1,0 +1,18 @@
+20
+
+I have the following questions: In the kernel, I have defined an integer array 'reference_count[]' as a global variable. 
+This 'reference_count' array is utilized in the functions 'uvmunmap', 'uvmcopy', and 'copyout' under the 'vm.c' file, 
+as well as in the function 'usertrap()' under the 'trap.c' file. 
+During my testing with 'usertests', I noticed that the 'reparent2' test resulted in unexpected errors, 
+leading to process termination (the reason for termination being an exception with 'scause' value 2). 
+I cannot confirm whether this is caused by concurrent access to the 'reference_count' array by multiple processes, 
+as the error disappeared in subsequent debugging sessions.
+
+To ensure safety, I defined a spinlock, 'struct spinlock reference_lock', and implemented 'lock' and 'unlock' actions 
+around the access to the 'reference_count' array. This was done to ensure the correctness of the 'reference_count' array. 
+Subsequently, I ran 'usertests' five times consecutively, and the previous error did not recur. 
+Additionally, 'make grade' passed successfully. 
+However, I am still uncertain whether I have successfully resolved the issues introduced by 'reparent2'. 
+Nevertheless, on the other hand, the basic requirements of this experiment have been largely met, 
+and the 'Copy-On-Write' task is essentially complete. 
+It was a fantastic experiment, and I sincerely thank all the teachers! Thank you!
