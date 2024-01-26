@@ -143,3 +143,10 @@ else {
   p->killed = 1;
 }
 ```
+
+3. 关于“reference_count”的修改，应该遵循以下的原则：
+（1） 当进行“fork”时，物理页面的“reference_count”进行“+1”  
+（2） 当进程从页表中将物理页面逐出时，“reference_count”进行“-1”  
+（3） 当真正希望释放物理页面时，如果“reference_count”为1时真正释放；如果“reference_count”大于2说明被共享，此时不需要真正的释放
+
+5. 对“copyout”进行修改，因为它的操作是将内核数据读取到用户空间，可能遇到写入的
