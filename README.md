@@ -69,5 +69,38 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 }
 ```
 
+关于“reference_lock”和“reference_count”数组的定义，实现在“kalloc.c”中，并且在“kalloc()”和“kfree()”中分别对“reference_count”进行了置1和置0的操作。  
+（1）定义  
+```
+int reference_count[(128*1024*1024)>>12];
+struct spinlock reference_lock;
+```  
+（2）kinit()函数初始化“reference_lock”  
+```
+void
+kinit()
+{
+  initlock(&kmem.lock, "kmem");
+  freerange(end, (void*)PHYSTOP);
+  initlock(&reference_lock, "reference_lock");
+}
+```
+（3）kfree()函数中“reference_count”置0
+```
+  acquire(&kmem.lock);
+  r->next = kmem.freelist;
+  kmem.freelist = r;
 
+  reference_count[((uint64)r - KERNBASE) >> 12] = 0;
+
+  release(&kmem.lock);
+```
+（4）kalloc()函数中“reference_count”置1
+```
+if(r)
+{
+  memset((char*)r, 5, PGSIZE); // fill with junk
+  reference_count[((uint64)r - KERNBASE) >> 12] = 1;
+}
+```
 2. 当进程尝试向共享页面（COW page）执行“写”操作时，由于页表项的“PTE_W”已经被置位，所以此时会产生page fault。发生page fault时，通过“kalloc()”分配新的物理页面、拷贝旧物理页面的内存到新内存、修改当前页表的PTE的指向、并修改当前PTE的权限位（尤其是要注意COW bit和PTE_W的相应置位）
