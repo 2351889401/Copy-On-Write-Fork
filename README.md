@@ -14,4 +14,60 @@
 （2）至于页表项的‘Cow bit’和‘PTE_W’，表示了该页面是否被共享、是否可写。（实际上，我认为‘Cow bit’本质上来说不需要，因为如果访问‘Cow bit’，本质上访问了三级页表的最后一级页表的页表项，而访问到最后一级页表的页表项了，实际上就拿到了想要的页面对应的物理地址了，直接访问“reference_count”数组即可）  
 ![](https://github.com/2351889401/Copy-On-Write-Fork/blob/main/images/copy.png)  
 
+修改后的“uvmcopy”函数实现如下（原来的fork函数主要调用“uvmcopy”为子进程复制父进程的内存空间）  
+**注意下面的代码中实际上自定义了一个与“reference_count”数组相关的自旋锁，因为“reference_count”数组在内核中是共享的，不确定多CPU执行时会不会因为操作到同一个reference_count而出错**
+```
+// Given a parent process's page table, copy
+// its memory into a child's page table.
+// Copies both the page table and the
+// physical memory.
+// returns 0 on success, -1 on failure.
+// frees any allocated pages on failure.
+int
+uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
+{
+  pte_t *pte;
+  uint64 pa, i;
+  uint flags;
+  // char *mem;
+
+  pte_t *new_pte;
+
+  for(i = 0; i < sz; i += PGSIZE){
+    if((pte = walk(old, i, 0)) == 0)
+      panic("uvmcopy: pte should exist");
+    if((*pte & PTE_V) == 0)
+      panic("uvmcopy: page not present");
+    pa = PTE2PA(*pte);
+    
+
+    *pte &= (~PTE_W); //父进程对该页面失去了写的权限
+    *pte |= (1<<8); //父进程的cow bit置位
+    flags = PTE_FLAGS(*pte);//新的flags
+    acquire(&reference_lock);
+    reference_count[(pa - KERNBASE) >> 12] += 1;
+    release(&reference_lock);
+
+    //子进程此时不再申请新页面了
+    new_pte = walk(new, i, 1);
+    *new_pte = PA2PTE(pa);
+    *new_pte |= flags;
+
+    // if((mem = kalloc()) == 0)
+    //   goto err;
+    // memmove(mem, (char*)pa, PGSIZE);
+    // if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
+    //   kfree(mem);
+    //   goto err;
+    // }
+  }
+  return 0;
+
+//  err:
+//   uvmunmap(new, 0, i / PGSIZE, 1);
+//   return -1;
+}
+```
+
+
 2. 当进程尝试向共享页面（COW page）执行“写”操作时，由于页表项的“PTE_W”已经被置位，所以此时会产生page fault。发生page fault时，通过“kalloc()”分配新的物理页面、拷贝旧物理页面的内存到新内存、修改当前页表的PTE的指向、并修改当前PTE的权限位（尤其是要注意COW bit和PTE_W的相应置位）
