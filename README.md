@@ -71,10 +71,11 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 }
 ```
 
-关于“reference_lock”和“reference_count”数组的定义，实现在“kalloc.c”中，并且在“kalloc()”和“kfree()”中分别对“reference_count”进行了置1和置0的操作。  
+关于“reference_lock”和“reference_count”数组的定义，实现在“kalloc.c”中，并且在“kalloc()”和“kfree()”中分别对“reference_count”进行了“置1”和“置0”的操作。  
 （1）定义  
 ```
-int reference_count[(128*1024*1024)>>12];
+int reference_count[(128*1024*1024)>>12]; //因为查看内核源码内存的最高地址的宏定义：PHYSTOP 实际上是 KERNBASE + 128*1024*1024，
+//KERNBASE是真实内存的起始地址，所以实际的内存空间是128*1024*1024，我们以每一页为单位进行访问，所以数组元素的个数为（128*1024*1024）>>12
 struct spinlock reference_lock;
 ```  
 （2）kinit()函数初始化“reference_lock”  
@@ -87,7 +88,7 @@ kinit()
   initlock(&reference_lock, "reference_lock");
 }
 ```
-（3）kfree()函数中“reference_count”置0
+（3）kfree()函数中“reference_count”置0（**这里的置0特意放在了释放物理页面时候的“锁操作”中，因为会担心如果放在“锁操作”的外部（比如说下面语句的最后），此时物理页面已经释放，如果“kalloc”将刚刚回收的那一页给分配出去，对reference_count进行置1，之后当前内核线程中再执行reference_count置0的操作，此时这个数据就发生了错误。  总而言之，内核中的共享数据“reference_count”结合“锁”的场景可能很多，这里可能考虑的并不完善。但是有一些考虑是好事。**）
 ```
   acquire(&kmem.lock);
   r->next = kmem.freelist;
