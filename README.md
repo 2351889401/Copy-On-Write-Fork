@@ -88,7 +88,7 @@ kinit()
   initlock(&reference_lock, "reference_lock");
 }
 ```
-（3）kfree()函数中“reference_count”置0（**这里的置0特意放在了释放物理页面时候的“锁操作”中，因为会担心如果放在“锁操作”的外部（比如说下面语句的最后），此时物理页面已经释放，如果“kalloc”将刚刚回收的那一页给分配出去，对reference_count进行置1，之后当前内核线程中再执行reference_count置0的操作，此时这个数据就发生了错误。  总而言之，内核中的共享数据“reference_count”结合“锁”的场景可能很多，这里可能考虑的并不完善。但是有一些考虑是好事。**）
+（3）kfree()函数中“reference_count”置0（**这里的置0特意放在了释放物理页面时候的“锁操作”中，因为会担心如果放在“锁操作”的外部（比如说下面语句的最后），此时物理页面已经释放，如果“kalloc”（看下面的代码(4)）将刚刚回收的那一页给分配出去，对reference_count进行置1，之后当前内核线程中再执行reference_count置0的操作，此时这个数据就发生了错误。  总而言之，内核中的共享数据“reference_count”结合多线程（多CPU）的场景可能很多，这里可能考虑的并不完善。但是有一些考虑是好事。**）
 ```
   acquire(&kmem.lock);
   r->next = kmem.freelist;
