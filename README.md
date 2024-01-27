@@ -184,7 +184,7 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
 }
 ```  
 
-5. 对“copyout”进行修改，因为它的操作是将内核数据写入到用户空间，可能遇到写入的地址空间是COW的页面，没有写入的权限（**它的主要内容和usertrap()函数中很像，只是多了一句对 pte==0 和 \*pte==0 的判断，加入这些判断是因为在usertests中进行了更多的测试，可能给出的用户地址空间不合法或者没有映射，此时不应当进行'数据从内核到用户空间的拷贝'操作**）
+4. 对“copyout”进行修改，因为它的操作是将内核数据写入到用户空间，可能遇到写入的地址空间是COW的页面，没有写入的权限（**它的主要内容和usertrap()函数中很像，只是多了一句对 pte==0 和 \*pte==0 的判断，加入这些判断是因为在usertests中进行了更多的测试，可能给出的用户地址空间不合法或者没有映射，此时不应当进行'数据从内核到用户空间的拷贝'操作**）
 ```
 // Copy from kernel to user.
 // Copy len bytes from src to virtual address dstva in a given page table.
