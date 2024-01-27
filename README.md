@@ -307,6 +307,6 @@ reparent2(char *s)
   exit(0);
 }
 ```
-我不知道是不是**reference_count**数组并发访问的原因，曾经连续出现过2~3次错误，不过后来又没再出现。保险起见，我在内核中定义了自旋锁“reference_lock”，也不知道是否解决了这个问题。但是最终的测试是全部通过的。  
+我不知道是不是**reference_count**数组并发访问的原因，曾经连续出现过2~3次错误，不过后来又没再出现。保险起见，我在内核中定义了自旋锁“reference_lock”，也不知道是否解决了这个问题。但是最终的测试是全部通过的（连续5次进行了usertests的测试都通过了，并且make grade也通过了）。  
 ![](https://github.com/2351889401/Copy-On-Write-Fork/blob/main/images/cowtest.png)  
 ![](https://github.com/2351889401/Copy-On-Write-Fork/blob/main/images/usertests.png)
