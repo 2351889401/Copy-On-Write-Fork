@@ -148,9 +148,163 @@ else {
 }
 ```
 
-3. 关于“reference_count”的修改，应该遵循以下的原则：
-（1） 当进行“fork”时，物理页面的“reference_count”进行“+1”  
-（2） 当进程从页表中将物理页面逐出时，“reference_count”进行“-1”  
-（3） 当真正希望释放物理页面时，如果“reference_count”为1时真正释放；如果“reference_count”大于2说明被共享，此时不需要真正的释放
+3. 关于“reference_count”的修改，应该遵循以下的原则：  
+（1） 当进行“fork”时，物理页面的“reference_count”进行“+1”（**体现在上面的uvmcopy()函数中**）  
+（2） 当进程从页表中将物理页面逐出时，“reference_count”进行“-1”（**除了上面的usertrap()函数，还体现在下面的uvmunmap()函数中**）  
+（3） 当真正希望释放物理页面时，如果“reference_count”为1时真正释放；如果“reference_count”大于2说明被共享，此时不需要真正的释放（**也体现在下面的uvmunmap()函数中**）
+```
+// Remove npages of mappings starting from va. va must be
+// page-aligned. The mappings must exist.
+// Optionally free the physical memory.
+void
+uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
+{
+  uint64 a;
+  pte_t *pte;
 
-5. 对“copyout”进行修改，因为它的操作是将内核数据读取到用户空间，可能遇到写入的
+  if((va % PGSIZE) != 0)
+    panic("uvmunmap: not aligned");
+
+  for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
+    if((pte = walk(pagetable, a, 0)) == 0)
+      panic("uvmunmap: walk");
+    if((*pte & PTE_V) == 0)
+      panic("uvmunmap: not mapped");
+    if(PTE_FLAGS(*pte) == PTE_V)
+      panic("uvmunmap: not a leaf");
+    if(do_free){
+      uint64 pa = PTE2PA(*pte);
+      acquire(&reference_lock);
+      if(reference_count[(pa-KERNBASE) >> 12] == 1) kfree((void*)pa);
+      else reference_count[(pa-KERNBASE) >> 12] -= 1;//因为这时共享页面其中一个共享源退出 此时reference_count应当-1
+      release(&reference_lock);
+    }
+    *pte = 0;
+  }
+}
+```  
+
+5. 对“copyout”进行修改，因为它的操作是将内核数据写入到用户空间，可能遇到写入的地址空间是COW的页面，没有写入的权限（**它的主要内容和usertrap()函数中很像，只是多了一句对 pte==0 和 \*pte==0 的判断，加入这些判断是因为在usertests中进行了更多的测试，可能给出的用户地址空间不合法或者没有映射，此时不应当进行'数据从内核到用户空间的拷贝'操作**）
+```
+// Copy from kernel to user.
+// Copy len bytes from src to virtual address dstva in a given page table.
+// Return 0 on success, -1 on error.
+int
+copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
+{
+  uint64 n, va0, pa0;
+
+  while(len > 0){
+    va0 = PGROUNDDOWN(dstva);
+
+    //判断下当前页面是不是共享页面
+    pte_t *pte = walk(pagetable, va0, 0);
+    if(pte == 0 || *pte == 0) return -1;
+    uint64 pa = PTE2PA(*pte);
+    acquire(&reference_lock);
+    if(reference_count[(pa-KERNBASE) >> 12] == 1) {
+      //即使当前reference_count等于1 COW bit和PTE_W可能也是不对的 需要修正
+      *pte &= ~(1<<8);//把COW bit置为0 表示现在这个页面不被共享
+      *pte |= PTE_W; 
+    }
+    else {
+      reference_count[(pa-KERNBASE) >> 12] -= 1;
+      char* mem = kalloc();
+      if(mem == 0) return -1;//如果没有足够的内存分配 杀死当前进程
+      else {
+        memset(mem, 0, PGSIZE);
+        memmove(mem, (char*)pa, PGSIZE);
+        uint flags = PTE_FLAGS(*pte);
+        flags |= PTE_W;
+        flags &= ~(1<<8);
+        mappages(pagetable, va0, PGSIZE, (uint64)mem, flags);//printf("hello mappages\n");
+      }
+    }
+    release(&reference_lock);
+
+    pa0 = walkaddr(pagetable, va0);
+    if(pa0 == 0)
+      return -1;
+    n = PGSIZE - (dstva - va0);
+    if(n > len)
+      n = len;
+    memmove((void *)(pa0 + (dstva - va0)), src, n);
+
+    len -= n;
+    src += n;
+    dstva = va0 + PGSIZE;
+  }
+  return 0;
+}
+```
+另外，对“walk()”函数和“mappages()”函数的少量修改如下：  
+“walk()”：因为我们在“copyout()”函数中对“walk()”进行了调用，此时不拷贝数据即可，不需要“panic”。
+```
+pte_t *
+walk(pagetable_t pagetable, uint64 va, int alloc)
+{
+  if(va >= MAXVA)
+    // panic("walk");
+    return 0;
+
+  ...
+}
+```
+“mappages()”：因为我们在fork的时候在子进程的页表中已经对虚拟地址进行了相应的映射，之后为其分配新的物理页面时，要通过“mappages”函数进行页面的注册，而之前的“*pte”的“PTE_V”已经置位了，这时需要把下面的“注释部分”给注释掉。（当然，这里也可以不注释掉，只要去掉“usertrap()”和“copyout()”函数中对“mappages()”的调用，转而手动实现“mappages()”的逻辑即可）
+```
+// Create PTEs for virtual addresses starting at va that refer to
+// physical addresses starting at pa. va and size might not
+// be page-aligned. Returns 0 on success, -1 if walk() couldn't
+// allocate a needed page-table page.
+int
+mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
+{
+  uint64 a, last;
+  pte_t *pte;
+
+  a = PGROUNDDOWN(va);
+  last = PGROUNDDOWN(va + size - 1);
+  for(;;){
+    if((pte = walk(pagetable, a, 1)) == 0)
+      return -1;
+    // if(*pte & PTE_V)
+      // panic("remap");
+    *pte = PA2PTE(pa) | perm | PTE_V;
+    if(a == last)
+      break;
+    a += PGSIZE;
+    pa += PGSIZE;
+  }
+  return 0;
+}
+```
+至此，完成了全部的实验。  
+
+还有一个小问题是在“usertests”中的一个测试“reparent2”，似乎是通过fork创建了很多的子进程：
+```
+// regression test. does reparent() violate the parent-then-child
+// locking order when giving away a child to init, so that exit()
+// deadlocks against init's wait()? also used to trigger a "panic:
+// release" due to exit() releasing a different p->parent->lock than
+// it acquired.
+void
+reparent2(char *s)
+{
+  for(int i = 0; i < 800; i++){
+    int pid1 = fork();
+    if(pid1 < 0){
+      printf("fork failed\n");
+      exit(1);
+    }
+    if(pid1 == 0){
+      fork();
+      fork();
+      exit(0);
+    }
+    wait(0);
+  }
+
+  exit(0);
+}
+```
+我不知道是不是**reference_count**数组并发访问的原因，曾经连续出现过2~3次错误，不过后来又没再出现。保险起见，我在内核中定义了自旋锁“reference_lock”，也不知道是否解决了这个问题。但是最终的测试是全部通过的。
