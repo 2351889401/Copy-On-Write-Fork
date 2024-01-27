@@ -17,7 +17,7 @@
 ![](https://github.com/2351889401/Copy-On-Write-Fork/blob/main/images/copy.png)  
 
 修改后的“uvmcopy”函数实现如下（原来的fork函数主要调用“uvmcopy”为子进程复制父进程的内存空间）  
-**注意下面的代码中实际上自定义了一个与“reference_count”数组相关的自旋锁，因为“reference_count”数组在内核中是共享的，不确定多CPU执行时会不会因为操作到同一个reference_count数组的元素而出错。**
+**注意下面的代码中实际上使用了一个与“reference_count”数组相关的自旋锁（数组和锁的定义在下面介绍），因为“reference_count”数组在内核中是共享的，不确定多CPU执行时会不会因为操作到同一个reference_count数组的元素而出错。**
 ```
 // Given a parent process's page table, copy
 // its memory into a child's page table.
