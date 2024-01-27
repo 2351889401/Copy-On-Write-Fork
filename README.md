@@ -113,7 +113,8 @@ if(r)
 if(r_scause() == 15) {//因为这个实验中是有内存不能write 所以fault的原因应当是store相关的指令 此时该寄存器结果为15
   uint64 va_fault = r_stval(); //page fault的地址在什么地方 在stval()寄存器中
   uint64 down = PGROUNDDOWN(va_fault); //对该地址取基址
-  pte_t* pte = walk(p->pagetable, down, 0);
+  pte_t* pte = walk(p->pagetable, down, 0); //这里没有考虑 pte==0 或者 *pte==0 的情况，假设所有的store指令希望写入的都是真实的、在页表中存在的地址
+  //这里是简单起见，在copyout中则考虑了上面的情况；但是这里即使不考虑结果仍然是正确的。
   uint64 pa = PTE2PA(*pte);
   acquire(&reference_lock);
   if(reference_count[(pa-KERNBASE) >> 12] == 1) {
