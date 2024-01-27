@@ -98,7 +98,7 @@ kinit()
 
   release(&kmem.lock);
 ```
-（4）kalloc()函数中“reference_count”置1
+（4）kalloc()函数中“reference_count”置1（**这里没有放在“锁操作”里面，因为个人认为在正确释放物理页面的情况下，分配时，如果拿到的那一页一定是在内核中独一无二的数据，因此无需加锁**）
 ```
 if(r)
 {
